@@ -28,42 +28,73 @@ const SUSPENSE_CONFIG = {
   busyDelayMs: 300,
   busyMinDurationMs: 700,
 }
-
-// 🐨 create a pokemonResourceCache object
-
-// 🐨 create a getPokemonResource function which accepts a name checks the cache
-// for an existing resource. If there is none, then it creates a resource
-// and inserts it into the cache. Finally the function should return the
-// resource.
-
 function createPokemonResource(pokemonName) {
   return createResource(fetchPokemon(pokemonName))
+}
+
+const PokemonResourceCacheContext = React.createContext();
+
+function PokemonCacheProvider({cacheTime=5000, children}) {
+  const cache = React.useRef({})
+  
+  const getPokemonResource = React.useCallback( (pokemonName) => {
+    const lowerName = pokemonName.toLowerCase();
+    const now = Date.now();
+    let resourceCache = cache.current[lowerName];
+    if (resourceCache && resourceCache.resource && (now - resourceCache.start) > cacheTime) {
+      // cache.current[lowerName] = {
+      //   resource: null
+      // }
+      delete cache.current[lowerName]['resource']
+    }
+    let resource = resourceCache?.resource || null;
+    if (!resource) {
+      resource = createPokemonResource(lowerName);
+      cache.current[lowerName] = {
+        resource,
+        start: Date.now()
+      };
+    } 
+    return resource;
+  }, [cacheTime])
+  return (
+    <PokemonResourceCacheContext.Provider value={getPokemonResource}>
+      {children}
+    </PokemonResourceCacheContext.Provider>
+  )
+}
+
+
+function usePokemonResourceCache() {
+  return React.useContext(PokemonResourceCacheContext);
 }
 
 function App() {
   const [pokemonName, setPokemonName] = React.useState('')
   const [startTransition, isPending] = React.useTransition(SUSPENSE_CONFIG)
   const [pokemonResource, setPokemonResource] = React.useState(null)
-
+  
+  const getPokemonResource =  usePokemonResourceCache();
+  
   React.useEffect(() => {
     if (!pokemonName) {
       setPokemonResource(null)
       return
     }
     startTransition(() => {
-      // 🐨 change this to getPokemonResource instead
-      setPokemonResource(createPokemonResource(pokemonName))
+      const resource = getPokemonResource(pokemonName);
+      setPokemonResource(resource)
     })
-  }, [pokemonName, startTransition])
-
+  }, [pokemonName, startTransition, getPokemonResource])
+  
   function handleSubmit(newPokemonName) {
     setPokemonName(newPokemonName)
   }
-
+  
   function handleReset() {
     setPokemonName('')
   }
-
+  
   return (
     <div className="pokemon-info-app">
       <PokemonForm pokemonName={pokemonName} onSubmit={handleSubmit} />
@@ -71,21 +102,28 @@ function App() {
       <div className={`pokemon-info ${isPending ? 'pokemon-loading' : ''}`}>
         {pokemonResource ? (
           <PokemonErrorBoundary
-            onReset={handleReset}
-            resetKeys={[pokemonResource]}
+          onReset={handleReset}
+          resetKeys={[pokemonResource]}
           >
             <React.Suspense
               fallback={<PokemonInfoFallback name={pokemonName} />}
-            >
+              >
               <PokemonInfo pokemonResource={pokemonResource} />
             </React.Suspense>
           </PokemonErrorBoundary>
         ) : (
           'Submit a pokemon'
-        )}
+          )}
       </div>
     </div>
   )
 }
 
-export default App
+
+export default function AppWithProvider () {
+  return (
+    <PokemonCacheProvider>
+      <App/>
+    </PokemonCacheProvider>
+  )
+}
